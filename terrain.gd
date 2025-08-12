@@ -1,30 +1,35 @@
-# res://Terrain.gd (Godot 4)
+# res://Terrain.gd  (Godot 4.x)
 extends Node2D
 
-# ========== 基本設定 ==========
-const TILE := 32
-const SIZE := Vector2i(32, 18)
-const MAX_H := 5
-const DESIRED_H := 2                       # 目標高さ（黄色）
-const DAILY_TZ_OFFSET_SEC := 0             # デイリー切替（UTC基準）
+# ====== 基本設定 ======
+const TILE: int = 32
+const SIZE: Vector2i = Vector2i(32, 18)      # 盤面サイズ（表示はこの上にターゲット枠を描く）
+const MAX_H: int = 5
+const DESIRED_H: int = 2                      # 目標高さ（黄色）
+const DAILY_TZ_OFFSET_SEC: int = 0            # デイリー切替（UTC基準なら0）
 
-# ========== 色 ==========
-const SOIL_BROWN    := Color(0.70, 0.55, 0.28) # h=0
-const SOIL_BLEND    := Color(0.80, 0.70, 0.38) # h=1
-const GOAL_YELLOW   := Color(0.93, 0.86, 0.35) # h=2
-const YELLOW_GREEN  := Color(0.62, 0.85, 0.45) # h=3
-const GREEN         := Color(0.16, 0.60, 0.20) # h=4
-const DEEP_GREEN    := Color(0.06, 0.35, 0.10) # h=5
+# ====== 色（ターゲット内の高さ→色）======
+const SOIL_BROWN    := Color(0.70, 0.55, 0.28) # h=0 茶
+const SOIL_BLEND    := Color(0.80, 0.70, 0.38) # h=1 土っぽい
+const GOAL_YELLOW   := Color(0.93, 0.86, 0.35) # h=2 目標
+const YELLOW_GREEN  := Color(0.62, 0.85, 0.45) # h=3 黄緑
+const GREEN         := Color(0.16, 0.60, 0.20) # h=4 緑
+const DEEP_GREEN    := Color(0.06, 0.35, 0.10) # h=5 深緑
 
-# ========== エクスポート ==========
+# ====== エクスポート ======
 @export var hud_path: NodePath
 @export var target_rect: Rect2i = Rect2i(Vector2i(8, 5), Vector2i(16, 8))
+
+# SFX は AudioStreamPlayer をアサイン
 @export var sfx_dig_path: NodePath
 @export var sfx_place_path: NodePath
 @export var sfx_ng_path: NodePath
 
-# ========== 状態 ==========
-var heights: Array = []      # heights[x][y]（0..5）
+# 日本語フォント（TTF を同梱してください）
+@export var ui_font_path: String = "res://fonts/NotoSansJP-Regular.ttf"
+
+# ====== 状態 ======
+var heights: Array = []        # 2D 配列：heights[x][y]（0..5）
 var inventory: int = 0
 var clicks_total: int = 0
 var clicks_success: int = 0
@@ -36,17 +41,23 @@ var rng: RandomNumberGenerator = RandomNumberGenerator.new()
 
 # 参照
 @onready var hud: Label = (get_node_or_null(hud_path) as Label)
-@onready var sfx_dig: Node = get_node_or_null(sfx_dig_path)
-@onready var sfx_place: Node = get_node_or_null(sfx_place_path)
-@onready var sfx_ng: Node = get_node_or_null(sfx_ng_path)
+@onready var sfx_dig: AudioStreamPlayer = get_node_or_null(sfx_dig_path) as AudioStreamPlayer
+@onready var sfx_place: AudioStreamPlayer = get_node_or_null(sfx_place_path) as AudioStreamPlayer
+@onready var sfx_ng: AudioStreamPlayer = get_node_or_null(sfx_ng_path) as AudioStreamPlayer
+
+var _ui_font: FontFile = null
 
 # オーバーレイ
 var overlay_layer: CanvasLayer
 var rules_overlay: Control
 var result_overlay: Control
 
-# ========== ライフサイクル ==========
+# ====== ライフサイクル ======
 func _ready() -> void:
+	_load_ui_font()
+	if _ui_font and hud:
+		hud.add_theme_font_override("font", _ui_font)
+
 	day_id = _current_day_id()
 
 	overlay_layer = CanvasLayer.new()
@@ -57,7 +68,7 @@ func _ready() -> void:
 	_generate_world_daily()
 	_build_rules_overlay()
 	_build_result_overlay()
-	_show_rules_overlay(true)
+	_show_rules_overlay(true)           # 起動時はルール表示
 	_update_hud()
 	queue_redraw()
 
@@ -65,7 +76,7 @@ func _process(_delta: float) -> void:
 	if hud and start_msec >= 0 and finish_msec < 0:
 		_update_hud()
 
-# ========== デイリー生成 ==========
+# ====== デイリー生成 ======
 func _current_day_id() -> int:
 	var now_s: int = Time.get_unix_time_from_system()
 	var shift: int = DAILY_TZ_OFFSET_SEC
@@ -93,8 +104,15 @@ func _generate_world_daily() -> void:
 	finish_msec = -1
 	result_shown = false
 
-# ========== 描画 ==========
+# ====== 描画 ======
 func _draw() -> void:
+ # ▼追加：ターゲット範囲の下地を一色で塗る（スキマから見える色を一定に）
+	var under := Rect2(
+		Vector2(target_rect.position.x * TILE, target_rect.position.y * TILE),
+		Vector2(target_rect.size.x * TILE,  target_rect.size.y * TILE)
+	)
+	draw_rect(under, Color(0.08, 0.08, 0.10, 1.0))  # 好みで明るさを調整
+
 	for x in range(SIZE.x):
 		for y in range(SIZE.y):
 			var h: int = int(heights[x][y])
@@ -111,21 +129,24 @@ func _draw() -> void:
 			else:
 				var shade: float = 0.18 + 0.10 * (float(h) / float(MAX_H))
 				col = Color(shade, shade, shade, 0.85)
-			draw_rect(Rect2(Vector2(x * TILE, y * TILE), Vector2(TILE - 1, TILE - 1)), col)
-
+			var pos := Vector2(x * TILE, y * TILE)
+			draw_rect(Rect2(pos, Vector2(TILE - 1, TILE - 1)), col)
+	
+	
+	
+	# ターゲットの白枠
 	var outline_rect: Rect2 = Rect2(
 		Vector2(target_rect.position.x * TILE, target_rect.position.y * TILE),
 		Vector2(target_rect.size.x * TILE, target_rect.size.y * TILE)
 	)
 	draw_rect(outline_rect, Color(1, 1, 1, 1), false, 2.0)
 
-# UI（ルール/結果オーバーレイ）表示中はゲーム入力をブロック
+# ====== 入力 ======
 func _ui_blocking() -> bool:
 	return (rules_overlay and rules_overlay.visible) or (result_overlay and result_overlay.visible)
 
-# 入力ハンドラ（Godot 4）
 func _unhandled_input(event: InputEvent) -> void:
-	# オーバーレイが出ているときは Esc で閉じるだけ許可
+	# オーバーレイ表示中は Esc で閉じるだけ
 	if _ui_blocking():
 		if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE:
 			if rules_overlay and rules_overlay.visible:
@@ -134,7 +155,7 @@ func _unhandled_input(event: InputEvent) -> void:
 				_close_result_overlay()
 		return
 
-	# マウスクリック（掘る/盛る）
+	# クリック（掘る/盛る）
 	if event is InputEventMouseButton and event.pressed:
 		var m: Vector2 = get_local_mouse_position()
 		var cell: Vector2i = Vector2i(int(floor(m.x / TILE)), int(floor(m.y / TILE)))
@@ -143,9 +164,9 @@ func _unhandled_input(event: InputEvent) -> void:
 			_start_timer_if_needed()
 			var ok: bool = false
 			if event.button_index == MOUSE_BUTTON_LEFT:
-				ok = _dig(cell)          # 掘る
+				ok = _dig(cell)
 			elif event.button_index == MOUSE_BUTTON_RIGHT:
-				ok = _place(cell)        # 盛る
+				ok = _place(cell)
 			if ok:
 				clicks_success += 1
 				_play_sfx(sfx_dig if event.button_index == MOUSE_BUTTON_LEFT else sfx_place)
@@ -154,39 +175,27 @@ func _unhandled_input(event: InputEvent) -> void:
 			_update_hud()
 		return
 
-	# キー入力
+	# キー
 	if event is InputEventKey and event.pressed and not event.echo:
 		match event.keycode:
 			KEY_R:
-				_generate_world_daily()   # 同じデイリーを再生成
+				_generate_world_daily()
 				_update_hud()
 				queue_redraw()
 			KEY_SPACE:
-				_auto_step()              # 自動1手（スコア加算なし）
+				_auto_step()
 			KEY_H:
-				_show_rules_overlay(true) # ルールを開く
+				_show_rules_overlay(true)
 			KEY_ESCAPE:
-				# 何も開いていない時のEscはルールを開く/閉じるトグルにしてもOK
 				if rules_overlay and rules_overlay.visible:
 					_show_rules_overlay(false)
 				else:
 					_show_rules_overlay(true)
 
-			# ▼ モバイル解像度テスト（PC上で素早く確認）
-			KEY_F6:  get_window().size = Vector2i(360, 800)   # 小さめスマホ縦
-			KEY_F7:  get_window().size = Vector2i(414, 896)   # iPhone系目安
-			KEY_F8:  get_window().size = Vector2i(720, 1600)  # 一般的スマホ縦
-			KEY_F9:  get_window().size = Vector2i(1080, 2400) # 大型スマホ縦
-			KEY_F10: get_window().size = Vector2i(800, 1280)  # タブレット縦
-			KEY_F11: get_window().size = Vector2i(1600, 720)  # スマホ横
-			KEY_F12: get_window().size = Vector2i(1024, 576)  # 開発時サイズに戻す
-
-
-
 func _in_bounds(c: Vector2i) -> bool:
 	return c.x >= 0 and c.x < SIZE.x and c.y >= 0 and c.y < SIZE.y
 
-# ========== 隣接 & 斜面チェック ==========
+# ====== 隣接 & 斜面チェック（STRICT: 事前+事後）======
 func _neighbors4(c: Vector2i) -> Array:
 	var arr: Array = []
 	var offs: Array = [Vector2i(1,0), Vector2i(-1,0), Vector2i(0,1), Vector2i(0,-1)]
@@ -196,6 +205,7 @@ func _neighbors4(c: Vector2i) -> Array:
 			arr.append(p)
 	return arr
 
+# 事前：今の高さで「どれか1方向」と段差<=1
 func _reachable_now(c: Vector2i) -> bool:
 	var h: int = int(heights[c.x][c.y])
 	for n in _neighbors4(c):
@@ -204,6 +214,7 @@ func _reachable_now(c: Vector2i) -> bool:
 			return true
 	return false
 
+# 事後：操作後の高さでも「どれか1方向」と段差<=1が残る
 func _stable_after(c: Vector2i, new_h: int) -> bool:
 	for n in _neighbors4(c):
 		var hn: int = int(heights[n.x][n.y])
@@ -211,15 +222,13 @@ func _stable_after(c: Vector2i, new_h: int) -> bool:
 			return true
 	return false
 
-# ========== 掘る/盛る ==========
+# ====== 掘る / 盛る ======
 func _dig(c: Vector2i) -> bool:
 	var h: int = int(heights[c.x][c.y])
-	if h <= 0:
-		return false
-	if not _reachable_now(c):
-		return false
-	if not _stable_after(c, h - 1):
-		return false
+	if h <= 0: return false
+	if not _reachable_now(c): return false
+	if not _stable_after(c, h - 1): return false
+
 	heights[c.x][c.y] = h - 1
 	inventory += 1
 	_check_goal()
@@ -228,24 +237,22 @@ func _dig(c: Vector2i) -> bool:
 
 func _place(c: Vector2i) -> bool:
 	var h: int = int(heights[c.x][c.y])
-	if inventory <= 0 or h >= MAX_H:
-		return false
-	if not _reachable_now(c):
-		return false
-	if not _stable_after(c, h + 1):
-		return false
+	if inventory <= 0 or h >= MAX_H: return false
+	if not _reachable_now(c): return false
+	if not _stable_after(c, h + 1): return false
+
 	heights[c.x][c.y] = h + 1
 	inventory -= 1
 	_check_goal()
 	queue_redraw()
 	return true
 
-# ========== サウンド ==========
-func _play_sfx(node: Node) -> void:
-	if node and node.has_method("play"):
-		node.play()
+# ====== サウンド ======
+func _play_sfx(player: AudioStreamPlayer) -> void:
+	if player:
+		player.play()
 
-# ========== タイマー/スコア ==========
+# ====== タイマー/スコア ======
 func _start_timer_if_needed() -> void:
 	if start_msec < 0:
 		start_msec = Time.get_ticks_msec()
@@ -270,9 +277,11 @@ func _update_hud() -> void:
 	var dev: int = _deviation_sum()
 	if dev == 0 and start_msec >= 0 and finish_msec < 0:
 		finish_msec = Time.get_ticks_msec()
+
 	var elapsed: float = _elapsed_seconds()
 	var fails: int = clicks_total - clicks_success
 	var date_str: String = _day_string()
+
 	var msg: String = "Daily: %s  Seed: #%d\n" % [date_str, day_id]
 	msg += "Goal H: %d  Inventory: %d\n" % [DESIRED_H, inventory]
 	msg += "Clicks: %d (OK:%d / NG:%d)   Time: %ss\n" % [clicks_total, clicks_success, fails, String.num(elapsed, 1)]
@@ -294,23 +303,21 @@ func _day_string() -> String:
 	var dict: Dictionary = Time.get_datetime_dict_from_unix_time(day_sec)
 	return "%04d-%02d-%02d" % [int(dict["year"]), int(dict["month"]), int(dict["day"])]
 
-# ========== 自動1手 ==========
+# ====== 自動1手（デバッグ用） ======
 func _auto_step() -> void:
 	for x in range(target_rect.position.x, target_rect.position.x + target_rect.size.x):
 		for y in range(target_rect.position.y, target_rect.position.y + target_rect.size.y):
 			var c: Vector2i = Vector2i(x, y)
 			if _in_bounds(c) and int(heights[x][y]) > DESIRED_H:
-				if _dig(c):
-					return
+				if _dig(c): return
 	if inventory > 0:
 		for x2 in range(target_rect.position.x, target_rect.position.x + target_rect.size.x):
 			for y2 in range(target_rect.position.y, target_rect.position.y + target_rect.size.y):
 				var c2: Vector2i = Vector2i(x2, y2)
 				if _in_bounds(c2) and int(heights[x2][y2]) < DESIRED_H:
-					if _place(c2):
-						return
+					if _place(c2): return
 
-# ========== オーバーレイ ==========
+# ====== オーバーレイ（モーダル） ======
 func _build_rules_overlay() -> void:
 	rules_overlay = _make_overlay()
 	overlay_layer.add_child(rules_overlay)
@@ -355,7 +362,6 @@ func _show_result_overlay() -> void:
 	var elapsed: float = _elapsed_seconds()
 	var date_str: String = _day_string()
 
-	# モード表記を削除した共有テキスト
 	var share: String = "Seichi Daily %s  #%d\nClicks:%d (OK:%d / NG:%d)\nTime:%ss" % [
 		date_str, day_id, clicks_total, clicks_success, fails, String.num(elapsed, 1)
 	]
@@ -374,7 +380,7 @@ func _show_result_overlay() -> void:
 	if hud:
 		hud.visible = false
 
-# ========== ユーティリティ ==========
+# ====== ユーティリティ ======
 func _urlencode(s: String) -> String:
 	var t: String = s
 	t = t.replace("%", "%25")
@@ -386,7 +392,13 @@ func _urlencode(s: String) -> String:
 	t = t.replace("(", "%28").replace(")", "%29")
 	return t
 
-# “別ウィンドウ風”オーバーレイ生成（中央固定・ダークカード・白文字／左揃え）
+func _load_ui_font() -> void:
+	if ResourceLoader.exists(ui_font_path):
+		_ui_font = load(ui_font_path) as FontFile
+	else:
+		_ui_font = null
+
+# “別ウィンドウ風”オーバーレイ生成（中央固定・ダークカード・白文字/左揃え）
 func _make_overlay() -> Control:
 	var root: Control = Control.new()
 	root.name = "Overlay"
@@ -420,7 +432,7 @@ func _make_overlay() -> Control:
 	margin.add_theme_constant_override("margin_top", 24)
 	margin.add_theme_constant_override("margin_bottom", 24)
 	panel.add_child(margin)
-	margin.set_anchors_preset(Control.PRESET_FULL_RECT)   # ← パネルいっぱいに広げる
+	margin.set_anchors_preset(Control.PRESET_FULL_RECT)
 
 	var v: VBoxContainer = VBoxContainer.new()
 	v.name = "VBox"
@@ -435,7 +447,8 @@ func _make_overlay() -> Control:
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 	title.add_theme_font_size_override("font_size", 22)
 	title.add_theme_color_override("font_color", Color(1, 1, 1, 1))
-	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	if _ui_font:
+		title.add_theme_font_override("font", _ui_font)
 	v.add_child(title)
 
 	var sep: HSeparator = HSeparator.new()
@@ -445,10 +458,11 @@ func _make_overlay() -> Control:
 
 	var body: Label = Label.new()
 	body.name = "Body"
-	body.autowrap_mode = TextServer.AUTOWRAP_WORD
+	body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	body.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 	body.add_theme_color_override("font_color", Color(1, 1, 1, 0.95))
-	body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	if _ui_font:
+		body.add_theme_font_override("font", _ui_font)
 	v.add_child(body)
 
 	var btn_row: HBoxContainer = HBoxContainer.new()
@@ -458,13 +472,14 @@ func _make_overlay() -> Control:
 	btn_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	v.add_child(btn_row)
 
+	# リサイズ時も中央固定
 	call_deferred("_recenter_panel", panel)
 	panel.resized.connect(func(): _recenter_panel(panel))
 	get_viewport().size_changed.connect(func(): _recenter_panel(panel))
 
 	return root
 
-# オーバーレイ内容の適用
+# オーバーレイ内容を適用
 func _overlay_set_content(overlay: Control, title: String, body: String, buttons: Array) -> void:
 	if overlay == null:
 		return
@@ -476,7 +491,7 @@ func _overlay_set_content(overlay: Control, title: String, body: String, buttons
 	var body_node: Label = v.find_child("Body", true, false) as Label
 	var btn_row: HBoxContainer = v.find_child("Buttons", true, false) as HBoxContainer
 	if title_node == null or body_node == null or btn_row == null:
-		push_error("Overlay parts not found (Title/Body/Buttons)")
+		push_error("Overlay parts not found")
 		return
 
 	title_node.text = title
@@ -488,13 +503,15 @@ func _overlay_set_content(overlay: Control, title: String, body: String, buttons
 	for item in buttons:
 		var b: Button = Button.new()
 		b.text = String(item["text"])
+		if _ui_font:
+			b.add_theme_font_override("font", _ui_font)
 		var cb = item["cb"]
 		b.pressed.connect(cb)
 		btn_row.add_child(b)
 		if b.text == "スタート" or (item.has("style") and String(item["style"]) == "primary"):
 			_style_button_primary(b)
 
-# 中央固定：サイズ確定後・リサイズ時にも追従
+# 中央固定
 func _recenter_panel(panel: Control) -> void:
 	if panel == null:
 		return
@@ -512,7 +529,7 @@ func _recenter_panel(panel: Control) -> void:
 	panel.offset_top = -sz.y * 0.5
 	panel.offset_bottom =  sz.y * 0.5
 
-# 白背景＋ダーク文字ボタン（Godot 4）
+# 白背景＋ダーク文字ボタン
 func _style_button_primary(b: Button) -> void:
 	var normal: StyleBoxFlat = StyleBoxFlat.new()
 	normal.bg_color = Color(1, 1, 1, 1)
@@ -544,6 +561,5 @@ func _style_button_primary(b: Button) -> void:
 	b.add_theme_color_override("font_hover_color", font_col)
 	b.add_theme_color_override("font_pressed_color", font_col)
 	b.add_theme_color_override("font_disabled_color", Color(0.4, 0.42, 0.48, 1))
-
 	b.custom_minimum_size = Vector2(120, 36)
 	b.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
