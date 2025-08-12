@@ -1,0 +1,32 @@
+[gd_scene load_steps=5 format=3 uid="uid://b40y340b0yved"]
+
+[ext_resource type="Script" uid="uid://j2lk4lpgk7nu" path="res://terrain.gd" id="1_ig7tw"]
+[ext_resource type="AudioStream" uid="uid://bkau4vwolrnqd" path="res://audio/掘る.mp3" id="2_1bvp3"]
+[ext_resource type="AudioStream" uid="uid://bbngjqw8axye3" path="res://audio/盛る.mp3" id="3_lquwl"]
+[ext_resource type="AudioStream" uid="uid://cdu54s87vmasb" path="res://audio/NG.mp3" id="4_7mycd"]
+
+[node name="Main" type="Node2D"]
+
+[node name="Terrain" type="Node2D" parent="."]
+script = ExtResource("1_ig7tw")
+hud_path = NodePath("../HUD")
+sfx_dig_path = NodePath("../SFX_Dig (AudioStreamPlayer)")
+sfx_place_path = NodePath("../SFX_Place (AudioStreamPlayer)")
+sfx_ng_path = NodePath("../SFX_NG (AudioStreamPlayer)")
+
+[node name="HUD" type="Label" parent="."]
+custom_minimum_size = Vector2(8, 8)
+offset_left = 10.0
+offset_right = 40.0
+offset_bottom = 23.0
+theme_override_font_sizes/font_size = 18
+text = "HUD"
+
+[node name="SFX_Dig (AudioStreamPlayer)" type="AudioStreamPlayer" parent="."]
+stream = ExtResource("2_1bvp3")
+
+[node name="SFX_NG (AudioStreamPlayer)" type="AudioStreamPlayer" parent="."]
+stream = ExtResource("4_7mycd")
+
+[node name="SFX_Place (AudioStreamPlayer)" type="AudioStreamPlayer" parent="."]
+stream = ExtResource("3_lquwl")
